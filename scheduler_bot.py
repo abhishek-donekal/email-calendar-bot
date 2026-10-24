@@ -291,7 +291,7 @@ def run_scheduler_bot(dry_run: bool = False, max_messages: int = 25) -> dict:
     message_ids = list_unread_message_ids(gmail, max_messages)
     log.info("Found %d message(s) matching %r (cap %d).", len(message_ids), GMAIL_QUERY, max_messages)
 
-    stats = {"seen": len(message_ids), "events_created": 0, "no_event": 0, "errors": 0}
+    stats = {"seen": len(message_ids), "events_created": 0, "no_event": 0, "errors": 0, "stopped_early": False}
     consecutive_errors = 0
 
     for msg_id in message_ids:
@@ -335,6 +335,7 @@ def run_scheduler_bot(dry_run: bool = False, max_messages: int = 25) -> dict:
             consecutive_errors += 1
             if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                 log.error("%d failures in a row; stopping. Remaining mail is untouched.", consecutive_errors)
+                stats["stopped_early"] = True
                 break
 
     log.info("Done: %s", stats)
@@ -355,7 +356,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     stats = run_scheduler_bot(dry_run=args.dry_run, max_messages=args.max)
-    return 1 if stats["errors"] and not (stats["events_created"] or stats["no_event"]) else 0
+    # Fail the run (red in GitHub Actions) when it gave up, so a service outage isn't hidden behind a green tick.
+    if stats["stopped_early"] or (stats["errors"] and not (stats["events_created"] or stats["no_event"])):
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

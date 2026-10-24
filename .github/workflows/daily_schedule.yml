@@ -1,0 +1,39 @@
+name: Daily email-to-calendar
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # every day at 11:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Extract and log only (no events created, no mail modified)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: scheduler-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scheduler bot
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TIMEZONE: ${{ vars.TIMEZONE || 'UTC' }}
+        run: python scheduler_bot.py ${{ inputs.dry_run && '--dry-run' || '' }}

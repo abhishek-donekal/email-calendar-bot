@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 from dateutil import parser as date_parser
 from dotenv import load_dotenv
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -75,7 +76,16 @@ def get_services():
             token_uri=TOKEN_URI,
             scopes=SCOPES,
         )
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError as exc:
+            hint = {
+                "invalid_scope": "the refresh token was not granted both scopes "
+                                 "(gmail.modify AND calendar.events). Re-authorize with both.",
+                "invalid_grant": "the refresh token is expired or revoked. Generate a new one.",
+                "unauthorized_client": "GOOGLE_CLIENT_ID/SECRET are not the client that issued the refresh token.",
+            }.get(next((k for k in ("invalid_scope", "invalid_grant", "unauthorized_client") if k in str(exc)), ""), "")
+            raise SystemExit(f"Google token refresh failed: {exc}" + (f"\nLikely cause: {hint}" if hint else "")) from exc
     else:
         if os.path.exists(TOKEN_FILE):
             creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)

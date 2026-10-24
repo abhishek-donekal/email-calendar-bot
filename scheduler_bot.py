@@ -40,10 +40,12 @@ TOKEN_URI = "https://oauth2.googleapis.com/token"
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
 
-GEMINI_MODEL = "gemini-2.5-flash"
+# gemini-2.5-flash is closed to new API keys; override with the GEMINI_MODEL env var.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-3.8-flash"
 GMAIL_QUERY = "is:unread -label:Scheduled"
 SCHEDULED_LABEL_NAME = "Scheduled"
 MAX_BODY_CHARS = 8000
+MAX_CONSECUTIVE_ERRORS = 3  # stop early on config errors (bad model, bad key) instead of failing every email
 
 log = logging.getLogger("scheduler_bot")
 
@@ -290,6 +292,7 @@ def run_scheduler_bot(dry_run: bool = False, max_messages: int = 25) -> dict:
     log.info("Found %d message(s) matching %r (cap %d).", len(message_ids), GMAIL_QUERY, max_messages)
 
     stats = {"seen": len(message_ids), "events_created": 0, "no_event": 0, "errors": 0}
+    consecutive_errors = 0
 
     for msg_id in message_ids:
         try:
@@ -324,10 +327,15 @@ def run_scheduler_bot(dry_run: bool = False, max_messages: int = 25) -> dict:
             if scheduled_label_id:
                 modify["addLabelIds"] = [scheduled_label_id]
             gmail.users().messages().modify(userId="me", id=msg_id, body=modify).execute()
+            consecutive_errors = 0
         except Exception:
             # Leave the message unread so the next run retries it.
             log.exception("Failed to process message %s; leaving it unread.", msg_id)
             stats["errors"] += 1
+            consecutive_errors += 1
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                log.error("%d failures in a row; stopping. Remaining mail is untouched.", consecutive_errors)
+                break
 
     log.info("Done: %s", stats)
     return stats
@@ -347,7 +355,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     stats = run_scheduler_bot(dry_run=args.dry_run, max_messages=args.max)
-    return 1 if stats["errors"] and stats["errors"] == stats["seen"] else 0
+    return 1 if stats["errors"] and not (stats["events_created"] or stats["no_event"]) else 0
 
 
 if __name__ == "__main__":

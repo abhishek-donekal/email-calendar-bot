@@ -36,4 +36,5 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           TIMEZONE: ${{ vars.TIMEZONE || 'UTC' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
         run: python scheduler_bot.py ${{ inputs.dry_run && '--dry-run' || '' }}

@@ -1,6 +1,6 @@
 # Email-to-Calendar Scheduler Bot
 
-Reads your unread Gmail, uses Gemini (`gemini-2.5-flash`) to pull out any meeting or event,
+Reads your unread Gmail, uses Gemini (`gemini-3.8-flash` by default; set `GEMINI_MODEL` to change it) to pull out any meeting or event,
 and adds it to your primary Google Calendar. Runs locally or headless on GitHub Actions once a day.
 
 > **Heads up:** every email the bot processes is **marked as read**, whether or not it contained
@@ -25,6 +25,7 @@ and adds it to your primary Google Calendar. Runs locally or headless on GitHub 
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` | CI only | Headless OAuth (see step 3) |
 | `TIMEZONE` | recommended | IANA name, e.g. `America/New_York`. Defaults to `UTC`, so "3pm" means 3pm UTC on GitHub runners. |
 | `MAX_EMAILS` | no | Cap per run (default 25) |
+| `GEMINI_MODEL` | no | Gemini model name (default `gemini-3.8-flash`) |
 
 Locally, put these in a `.env` file (it's gitignored):
 

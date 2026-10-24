@@ -161,24 +161,84 @@ Body:
 """
 
 
-def extract_event_from_email(subject: str, sender: str, body: str, client=None) -> CalendarEventExtraction:
-    from google import genai
-    from google.genai import types
+# HTTP codes meaning "this model can't serve us right now; another model might".
+FALLBACK_CODES = {404, 429, 500, 503}
+_SKIP_MODEL_WORDS = ("image", "tts", "audio", "live", "embedding", "vision", "thinking-exp")
 
-    client = client or genai.Client()  # reads GEMINI_API_KEY
+_client = None
+_model_chain: Optional[list[str]] = None
+_dead_models: set[str] = set()
+
+
+def get_gemini_client():
+    """One client per run, with bounded retries so a busy model fails fast instead of stalling for minutes."""
+    global _client
+    if _client is None:
+        from google import genai
+        from google.genai import types
+
+        _client = genai.Client(  # reads GEMINI_API_KEY
+            http_options=types.HttpOptions(
+                retry_options=types.HttpRetryOptions(attempts=3, initial_delay=2.0, max_delay=15.0)
+            )
+        )
+    return _client
+
+
+def get_model_chain(client) -> list[str]:
+    """Primary model, then GEMINI_FALLBACK_MODELS (comma-separated) or, if unset, other flash models this key can use."""
+    global _model_chain
+    if _model_chain is not None:
+        return _model_chain
+    chain = [GEMINI_MODEL]
+    configured = [m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "").split(",") if m.strip()]
+    if configured:
+        chain += configured
+    else:
+        try:
+            found = []
+            for m in client.models.list():
+                name = (m.name or "").removeprefix("models/")
+                actions = m.supported_actions or []
+                if ("flash" in name and "generateContent" in actions
+                        and not any(w in name for w in _SKIP_MODEL_WORDS)):
+                    found.append(name)
+            chain += sorted(set(found), reverse=True)[:3]
+        except Exception as exc:
+            log.warning("Could not list Gemini models for fallback (%s).", exc)
+    _model_chain = list(dict.fromkeys(chain))
+    log.info("Gemini model order: %s", ", ".join(_model_chain))
+    return _model_chain
+
+
+def extract_event_from_email(subject: str, sender: str, body: str, client=None) -> CalendarEventExtraction:
+    from google.genai import errors, types
+
+    client = client or get_gemini_client()
     prompt = build_prompt(subject, sender, body, datetime.now(get_timezone()))
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=CalendarEventExtraction,
-            temperature=0,
-        ),
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=CalendarEventExtraction,
+        temperature=0,
     )
-    if isinstance(response.parsed, CalendarEventExtraction):
-        return response.parsed
-    return CalendarEventExtraction.model_validate_json(response.text)
+    last_exc: Optional[Exception] = None
+    for model in get_model_chain(client):
+        if model in _dead_models:
+            continue
+        try:
+            response = client.models.generate_content(model=model, contents=prompt, config=config)
+        except errors.APIError as exc:
+            if exc.code not in FALLBACK_CODES:
+                raise
+            if exc.code == 404:
+                _dead_models.add(model)  # closed or unknown; don't try it again this run
+            log.warning("Model %s unavailable (%s); trying next.", model, exc.code)
+            last_exc = exc
+            continue
+        if isinstance(response.parsed, CalendarEventExtraction):
+            return response.parsed
+        return CalendarEventExtraction.model_validate_json(response.text)
+    raise last_exc or RuntimeError("No usable Gemini model.")
 
 
 def normalize_times(event: CalendarEventExtraction, tz: ZoneInfo) -> Optional[tuple[datetime, datetime]]:

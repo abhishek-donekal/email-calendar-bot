@@ -26,6 +26,7 @@ and adds it to your primary Google Calendar. Runs locally or headless on GitHub 
 | `TIMEZONE` | recommended | IANA name, e.g. `America/New_York`. Defaults to `UTC`, so "3pm" means 3pm UTC on GitHub runners. |
 | `MAX_EMAILS` | no | Cap per run (default 25) |
 | `GEMINI_MODEL` | no | Gemini model name (default `gemini-3.8-flash`) |
+| `GEMINI_FALLBACK_MODELS` | no | Comma-separated models to try when the main one is busy. If unset, other "flash" models your key can use are tried automatically. |
 
 Locally, put these in a `.env` file (it's gitignored):
 
